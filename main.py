@@ -1,5 +1,5 @@
 
-
+# 資料儲存格式
 class Data:
     key: int
     value: str
@@ -9,6 +9,7 @@ class Data:
         self.key = key
         self.value = value
 
+# 自定義的字典
 class MyDictionary:
     _table: list[Data | None]
     _table_size = 20
@@ -17,25 +18,13 @@ class MyDictionary:
     def __init__(self):
         self._table = [None] * self._table_size
 
-    # 寫入資料
+    # 寫入資料接口
     def set(self, key: int, value: str):
-        hash1 = self._multiplicative_hash(key=key, table_size=self._table_size)
-        hash2 = self._second_hash(key=key, table_size=self._table_size)
-        count = 0
+        self._set(key=key, value=value)
 
-        index: int = hash1
-
-        while self._table[index] is not None:
-            count += 1
-            if count > self._table_size:
-                # 回圈次數保護
-                raise "hash func error"
-            data = self._table[index]
-            if data.is_deleted:
-                break
-            index = (index + count * hash2) % self._table_size
-        self._table[index] = Data(key=key, value=value)
-        self._data_size += 1
+        # load factor 過大時擴充表
+        if self._is_need_extend_table_size(data_size=self._data_size, table_size=self._table_size):
+            self._upgrade_table_size()
 
     #取得資料
     def get(self, key: int) -> str | None:
@@ -43,7 +32,6 @@ class MyDictionary:
         if index is not None:
             return self._table[index].value
         return None
-
 
     # Return: 如果資料存在返回移除的資料 否則返回空值
     def remove(self, key: int) -> str | None:
@@ -53,6 +41,33 @@ class MyDictionary:
             self._data_size -= 1
             return self._table[index].value
         return None
+
+    # 寫入資料
+    def _set(self, key: int, value: str):
+        # 先找有沒有已存在的資料
+        index = self._get_data_index(key=key)
+        if index is not None:
+            self._table[index] = Data(key=key, value=value)
+            return
+
+        # 寫入資料
+        hash1 = self._multiplicative_hash(key=key, table_size=self._table_size)
+        hash2 = self._second_hash(key=key, table_size=self._table_size)
+        count = 0
+        index: int = hash1
+
+        while self._table[index] is not None:
+            count += 1
+            if count > self._table_size:
+                # 回圈次數保護
+                raise "hash func error"
+            data = self._table[index]
+            # 資料已刪除, 可以寫入
+            if data.is_deleted:
+                break
+            index = (index + count * hash2) % self._table_size
+        self._table[index] = Data(key=key, value=value)
+        self._data_size += 1
 
     # 搜尋資料的所在位置的 index
     # Return: 如果無資料就回 None
@@ -73,9 +88,20 @@ class MyDictionary:
             count += 1
         return None
 
+
+    def _upgrade_table_size(self):
+        table_cache = self._table.copy()
+        self._table_size *= 2
+        self._table = [None] * self._table_size
+        for data in table_cache:
+            if data is not None and not data.is_deleted:
+                self._set(key=data.key, value=data.value)
+
+
     # 檢查是否需要擴充 table 容量
-    def _is_need_extend_table_size(self) -> bool:
-        load_factor = self._data_size/self._table_size
+    @staticmethod
+    def _is_need_extend_table_size(data_size: int, table_size: int) -> bool:
+        load_factor = data_size / table_size
         return load_factor > 0.5
 
     @staticmethod
@@ -88,10 +114,15 @@ class MyDictionary:
     def _second_hash(key: int, table_size: int) -> int:
         return 1 + (key % (table_size - 1))
 
+    @property
+    def table(self):
+        return self._table
+
 
 # 測試寫入
 # - 表示無資料, D 表示有資料
 def test_case_1() -> bool:
+    print("測試寫入")
     dic = MyDictionary()
     seed = 12344
     size = 5
@@ -107,6 +138,7 @@ def test_case_1() -> bool:
 
 # 寫入碰撞的 key 並讀取
 def test_case_2() -> bool:
+    print("測試寫入碰撞的 key 並讀取")
     dic = MyDictionary()
     # 第一組 key
     key = 1
@@ -129,6 +161,7 @@ def test_case_2() -> bool:
 
 # 讀取空資料
 def test_case_3() -> bool:
+    print("讀取空資料")
     dic = MyDictionary()
     for i in range(5):
         dic.set(i, str(i))
@@ -139,6 +172,7 @@ def test_case_3() -> bool:
 # 然後刪除第一筆, 再插入一筆
 # 確定會插入第一筆資料位置
 def test_case_4() -> bool:
+    print("測試資料寫入碰撞")
     dic = MyDictionary()
     # 做出多組碰撞的 keys
     keys = [10]
@@ -146,7 +180,7 @@ def test_case_4() -> bool:
     hash_value = dic._multiplicative_hash(key=keys[0], table_size=dic._table_size)
 
     for _ in range(2):
-        # 計算碰撞的第二組 key
+        # 計算碰撞的第 2, 3 組 key
         collision_key = keys[-1] + 1
         collision_hash_value = dic._multiplicative_hash(key=collision_key, table_size=dic._table_size)
         while collision_hash_value != hash_value:
@@ -174,20 +208,51 @@ def test_case_4() -> bool:
     print_data(dic)
     return dic._table[hash_value].value == str(keys[2])
 
+# 寫入大量資料觸發容量擴充
 def test_case_5() -> bool:
+    print("寫入大量資料觸發容量擴充")
     dic = MyDictionary()
     for k in range(15):
         dic.set(key=k, value=str(k))
     print_data(dic)
-    print(dic._is_need_extend_table_size())
-    return False
+
+    for k in range(15):
+        if dic.get(k) is None:
+            return False
+    return True
+
+# 寫入資料並刪除, 再寫入資料觸發擴充
+def test_case_6() -> bool:
+    print("寫入資料並刪除, 再寫入資料觸發擴充")
+    dic = MyDictionary()
+    for k in range(8):
+        dic.set(k, str(k))
+    for k in range(5):
+        dic.remove(k)
+    print("add and remove some keys")
+    print_data(dic)
+    for k in range(8, 15):
+        dic.set(k, str(k))
+    print("adding more keys but not triggers an upgrade to the table size")
+    print_data(dic)
+    if len(dic._table) > 20:
+        return False
+    print("Keep adding more keys until it triggers an upgrade to the table size.")
+    for k in range(15, 20):
+        dic.set(k, str(k))
+    print_data(dic)
+    if len(dic._table) < 20:
+        return False
+    return True
 
 def run_test_cases():
     test_cases = [
         test_case_1,
         test_case_2,
         test_case_3,
-        test_case_4
+        test_case_4,
+        test_case_5,
+        test_case_6
     ]
 
     for test in test_cases:
@@ -207,9 +272,8 @@ def print_data(dic: MyDictionary):
             return "XX"
         else:
             return data.value
-    datas = list(map(map_func, dic._table))
+    datas = list(map(map_func, dic.table))
     print(datas)
 
 if __name__ == "__main__":
-    # run_test_cases()
-    test_case_5()
+    run_test_cases()
